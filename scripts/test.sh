@@ -41,7 +41,7 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-echo "==> Waiting for mongofuse to mount (up to 30s)..."
+echo "==> Waiting for documentdbfuse to mount (up to 30s)..."
 for i in $(seq 1 15); do
     if exec_in mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
         echo "    FUSE mounted after ~$((i * 2))s"

@@ -1,4 +1,4 @@
-module github.com/xgerman/mongofuse
+module github.com/xgerman/documentdbfuse
 
 go 1.23.6
 

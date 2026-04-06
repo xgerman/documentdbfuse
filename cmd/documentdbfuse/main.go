@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/xgerman/mongofuse/internal/mongofuse/cmd"
+	"github.com/xgerman/documentdbfuse/internal/documentdbfuse/cmd"
 )
 
 func main() {

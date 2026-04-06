@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/xgerman/mongofuse/internal/mongofuse/db"
+	"github.com/xgerman/documentdbfuse/internal/documentdbfuse/db"
 )
 
 // Operations handles all filesystem operations by delegating to the MongoDB client.

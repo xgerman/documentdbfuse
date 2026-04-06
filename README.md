@@ -1,4 +1,4 @@
-# MongoFUSE
+# DocumentDBFUSE
 
 Mount any MongoDB-compatible database as a filesystem via FUSE (Linux) or NFS (macOS).
 
@@ -8,10 +8,10 @@ Browse collections with `ls`, read documents with `cat`, search with `grep`, wri
 
 ```bash
 # Build
-go build -o bin/mongofuse ./cmd/mongofuse
+go build -o bin/documentdbfuse ./cmd/documentdbfuse
 
 # Mount a MongoDB database
-mongofuse mount "mongodb://user:pass@localhost:27017" /mnt/db
+documentdbfuse mount "mongodb://user:pass@localhost:27017" /mnt/db
 
 # Explore
 ls /mnt/db/                              # list databases
@@ -81,7 +81,7 @@ ls /mnt/db/mydb/users/ | wc -l
 └──────────────┘     └──────────────┘     └──────────────┘
 ```
 
-MongoFUSE connects as a standard MongoDB client. It works with:
+DocumentDBFUSE connects as a standard MongoDB client. It works with:
 - [DocumentDB](https://github.com/documentdb/documentdb) (including documentdb-local)
 - MongoDB Community/Enterprise
 - Any MongoDB wire protocol compatible server
@@ -107,9 +107,9 @@ MongoFUSE connects as a standard MongoDB client. It works with:
 ## Development
 
 ```bash
-git clone https://github.com/xgerman/mongofuse.git
+git clone https://github.com/xgerman/documentdbfuse.git
 cd mongofuse
-go build -o bin/mongofuse ./cmd/mongofuse
+go build -o bin/documentdbfuse ./cmd/documentdbfuse
 go test ./...
 ```
 

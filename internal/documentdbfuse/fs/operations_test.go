@@ -38,3 +38,20 @@ func TestParsePath_NoExtension(t *testing.T) {
 		t.Errorf("expected DocumentID=123 no extension, got %+v", info)
 	}
 }
+
+func TestParsePath_Pipeline(t *testing.T) {
+info := ParsePath("/sampledb/users/.match/isActive/true/.export/json")
+if info.Database != "sampledb" || info.Collection != "users" {
+t.Errorf("unexpected db/coll: %+v", info)
+}
+if info.Pipeline == nil {
+t.Fatal("expected Pipeline to be non-nil")
+}
+if len(info.Pipeline.Stages) != 1 {
+t.Errorf("expected 1 stage, got %d: %+v", len(info.Pipeline.Stages), info.Pipeline.Stages)
+}
+if info.Pipeline.ExportFormat != "json" {
+t.Errorf("expected ExportFormat=json, got %q", info.Pipeline.ExportFormat)
+}
+t.Logf("PathInfo: %+v", info)
+}

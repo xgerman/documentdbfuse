@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/xgerman/mongofuse/internal/mongofuse/db"
-	"github.com/xgerman/mongofuse/internal/mongofuse/fs"
-	fusemod "github.com/xgerman/mongofuse/internal/mongofuse/fuse"
+	"github.com/xgerman/documentdbfuse/internal/documentdbfuse/db"
+	"github.com/xgerman/documentdbfuse/internal/documentdbfuse/fs"
+	fusemod "github.com/xgerman/documentdbfuse/internal/documentdbfuse/fuse"
 )
 
 func buildMountCmd() *cobra.Command {
@@ -23,9 +23,9 @@ func buildMountCmd() *cobra.Command {
 		Long: `Mount a MongoDB-compatible database at the specified mount point.
 
 Examples:
-  mongofuse mount "mongodb://localhost:27017" /mnt/db
-  mongofuse mount "mongodb://user:pass@host:10260/?tls=true&tlsAllowInvalidCertificates=true&directConnection=true" /mnt/db
-  mongofuse mount --read-only "mongodb://localhost:27017" /mnt/db`,
+  documentdbfuse mount "mongodb://localhost:27017" /mnt/db
+  documentdbfuse mount "mongodb://user:pass@host:10260/?tls=true&tlsAllowInvalidCertificates=true&directConnection=true" /mnt/db
+  documentdbfuse mount --read-only "mongodb://localhost:27017" /mnt/db`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			connString := args[0]
@@ -58,7 +58,7 @@ Examples:
 
 			// fs.Mount already starts serving in the background.
 			// Wait for SIGINT/SIGTERM to trigger clean shutdown.
-			fmt.Printf("MongoFUSE mounted at %s\n", mountPoint)
+			fmt.Printf("DocumentDBFUSE mounted at %s\n", mountPoint)
 
 			// Wait for SIGINT/SIGTERM to trigger clean shutdown.
 			sigCh := make(chan os.Signal, 1)

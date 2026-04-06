@@ -10,7 +10,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 
-	fsops "github.com/xgerman/mongofuse/internal/mongofuse/fs"
+	fsops "github.com/xgerman/documentdbfuse/internal/documentdbfuse/fs"
 )
 
 var (
@@ -157,6 +157,21 @@ func (c *CollectionNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Err
 }
 
 func (c *CollectionNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// Pipeline segment — enter pipeline traversal mode
+	if strings.HasPrefix(name, ".") {
+		child := &PipelineNode{
+			ops:          c.ops,
+			dbName:       c.dbName,
+			collName:     c.collName,
+			pathSegments: []string{name},
+		}
+		out.Mode = syscall.S_IFDIR | 0755
+		out.SetEntryTimeout(entryTimeout)
+		out.SetAttrTimeout(attrTimeout)
+		stable := fs.StableAttr{Mode: syscall.S_IFDIR}
+		return c.NewInode(ctx, child, stable), fs.OK
+	}
+
 	filePath := c.path() + "/" + name
 	data, err := c.ops.ReadFile(ctx, filePath)
 	if err != nil {
@@ -171,7 +186,7 @@ func (c *CollectionNode) Lookup(ctx context.Context, name string, out *fuse.Entr
 	out.Mode = syscall.S_IFREG | 0644
 	out.Size = uint64(len(data))
 	out.SetEntryTimeout(entryTimeout)
-	out.SetAttrTimeout(0) // no content caching
+	out.SetAttrTimeout(0)
 	stable := fs.StableAttr{Mode: syscall.S_IFREG}
 	return c.NewInode(ctx, child, stable), fs.OK
 }
@@ -283,6 +298,113 @@ func (d *DocumentNode) Write(ctx context.Context, fh fs.FileHandle, data []byte,
 }
 
 // ---------------------------------------------------------------------------
+// PipelineNode — virtual directory for aggregation pipeline traversal.
+// Each path segment (.match/field/value, .sort/field, etc.) is a directory.
+// The terminal .export/json becomes a readable file with query results.
+// ---------------------------------------------------------------------------
+
+type PipelineNode struct {
+	fs.Inode
+	ops          *fsops.Operations
+	dbName       string
+	collName     string
+	pathSegments []string // accumulated pipeline path segments
+}
+
+var _ = (fs.NodeLookuper)((*PipelineNode)(nil))
+var _ = (fs.NodeReaddirer)((*PipelineNode)(nil))
+
+func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	newSegments := append(append([]string{}, p.pathSegments...), name)
+
+	// Check if we've completed a .export/format terminal — return a readable file
+	if len(newSegments) >= 2 && newSegments[len(newSegments)-2] == ".export" {
+		child := &PipelineResultNode{
+			ops:          p.ops,
+			dbName:       p.dbName,
+			collName:     p.collName,
+			pathSegments: newSegments,
+		}
+		out.Mode = syscall.S_IFREG | 0444
+		out.SetEntryTimeout(0)
+		out.SetAttrTimeout(0)
+		stable := fs.StableAttr{Mode: syscall.S_IFREG}
+		return p.NewInode(ctx, child, stable), fs.OK
+	}
+
+	// Otherwise keep traversing as a directory
+	child := &PipelineNode{
+		ops:          p.ops,
+		dbName:       p.dbName,
+		collName:     p.collName,
+		pathSegments: newSegments,
+	}
+	out.Mode = syscall.S_IFDIR | 0755
+	out.SetEntryTimeout(entryTimeout)
+	out.SetAttrTimeout(attrTimeout)
+	stable := fs.StableAttr{Mode: syscall.S_IFDIR}
+	return p.NewInode(ctx, child, stable), fs.OK
+}
+
+func (p *PipelineNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	// Suggest available next segments
+	entries := []fuse.DirEntry{
+		{Name: ".match", Mode: syscall.S_IFDIR},
+		{Name: ".sort", Mode: syscall.S_IFDIR},
+		{Name: ".limit", Mode: syscall.S_IFDIR},
+		{Name: ".skip", Mode: syscall.S_IFDIR},
+		{Name: ".project", Mode: syscall.S_IFDIR},
+		{Name: ".export", Mode: syscall.S_IFDIR},
+	}
+	return fs.NewListDirStream(entries), fs.OK
+}
+
+// ---------------------------------------------------------------------------
+// PipelineResultNode — a readable file that executes the aggregation pipeline.
+// ---------------------------------------------------------------------------
+
+type PipelineResultNode struct {
+	fs.Inode
+	ops          *fsops.Operations
+	dbName       string
+	collName     string
+	pathSegments []string
+}
+
+var _ = (fs.NodeOpener)((*PipelineResultNode)(nil))
+var _ = (fs.NodeReader)((*PipelineResultNode)(nil))
+var _ = (fs.NodeGetattrer)((*PipelineResultNode)(nil))
+
+func (r *PipelineResultNode) fullPath() string {
+	return "/" + r.dbName + "/" + r.collName + "/" + strings.Join(r.pathSegments, "/")
+}
+
+func (r *PipelineResultNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	// Report a large estimated size so the kernel calls Read.
+	// The actual data is fetched fresh in Read().
+	out.Mode = syscall.S_IFREG | 0444
+	out.Size = 4096 // estimated; actual content comes from Read
+	out.SetTimeout(0)
+	return fs.OK
+}
+
+func (r *PipelineResultNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	return nil, 0, fs.OK
+}
+
+func (r *PipelineResultNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	data, err := r.ops.ReadFile(ctx, r.fullPath())
+	if err != nil {
+		return nil, syscall.EIO
+	}
+	data = append(data, '\n')
+	if off >= int64(len(data)) {
+		return fuse.ReadResultData(nil), fs.OK
+	}
+	return fuse.ReadResultData(data[off:]), fs.OK
+}
+
+// ---------------------------------------------------------------------------
 // Server creates and returns a FUSE server for the given mount point.
 // ---------------------------------------------------------------------------
 
@@ -291,8 +413,8 @@ func Server(mountPoint string, ops *fsops.Operations, extraOpts ...string) (*fus
 
 	opts := &fs.Options{
 		MountOptions: fuse.MountOptions{
-			FsName:        "mongofuse",
-			Name:          "mongofuse",
+			FsName:        "documentdbfuse",
+			Name:          "documentdbfuse",
 			DisableXAttrs: true,
 			Debug:         false,
 			Options:       extraOpts,

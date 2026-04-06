@@ -7,9 +7,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "mongofuse",
+	Use:   "documentdbfuse",
 	Short: "Mount any MongoDB-compatible database as a filesystem",
-	Long: `MongoFUSE mounts a MongoDB database via FUSE (Linux).
+	Long: `DocumentDBFUSE mounts a MongoDB database via FUSE (Linux).
 Browse collections with ls, read documents with cat, search with grep.`,
 }
 
@@ -29,7 +29,7 @@ func buildVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("mongofuse v0.1.0")
+			fmt.Println("documentdbfuse v0.1.0")
 		},
 	}
 }
