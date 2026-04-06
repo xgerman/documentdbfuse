@@ -318,19 +318,21 @@ var _ = (fs.NodeReader)((*PipelineNode)(nil))
 var _ = (fs.NodeGetattrer)((*PipelineNode)(nil))
 
 func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	// "results.json" — read current pipeline results as a file
-	if name == "results.json" {
-		child := &PipelineResultNode{
+	// .json / .csv / .tsv — hidden format directories containing "results"
+	if name == ".json" || name == ".csv" || name == ".tsv" {
+		format := strings.TrimPrefix(name, ".")
+		exportSegments := append(append([]string{}, p.pathSegments...), ".export", format)
+		child := &FormatDirNode{
 			ops:          p.ops,
 			dbName:       p.dbName,
 			collName:     p.collName,
-			pathSegments: p.pathSegments,
+			pathSegments: exportSegments,
+			format:       format,
 		}
-		out.Mode = syscall.S_IFREG | 0444
-		out.Size = 4096
-		out.SetEntryTimeout(0)
-		out.SetAttrTimeout(0)
-		stable := fs.StableAttr{Mode: syscall.S_IFREG}
+		out.Mode = syscall.S_IFDIR | 0755
+		out.SetEntryTimeout(entryTimeout)
+		out.SetAttrTimeout(attrTimeout)
+		stable := fs.StableAttr{Mode: syscall.S_IFDIR}
 		return p.NewInode(ctx, child, stable), fs.OK
 	}
 
@@ -357,7 +359,7 @@ func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryO
 
 	newSegments := append(append([]string{}, p.pathSegments...), name)
 
-	// .export/format terminal — return a readable file
+	// .export/format terminal — return a readable file (legacy support)
 	if len(newSegments) >= 2 && newSegments[len(newSegments)-2] == ".export" {
 		child := &PipelineResultNode{
 			ops:          p.ops,
@@ -419,8 +421,7 @@ func (p *PipelineNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno
 		fullPath := "/" + p.dbName + "/" + p.collName + "/" + strings.Join(p.pathSegments, "/")
 		dirEntries, readErr := p.ops.ReadDir(ctx, fullPath)
 		if readErr == nil && len(dirEntries) > 0 {
-			out := make([]fuse.DirEntry, 0, len(dirEntries)+1)
-			out = append(out, fuse.DirEntry{Name: "results.json", Mode: syscall.S_IFREG})
+			out := make([]fuse.DirEntry, 0, len(dirEntries))
 			for _, name := range dirEntries {
 				out = append(out, fuse.DirEntry{Name: name, Mode: syscall.S_IFREG})
 			}
@@ -430,13 +431,53 @@ func (p *PipelineNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno
 
 	// Incomplete pipeline or no results — show available segments
 	entries := []fuse.DirEntry{
-		{Name: "results.json", Mode: syscall.S_IFREG},
 		{Name: ".match", Mode: syscall.S_IFDIR},
 		{Name: ".sort", Mode: syscall.S_IFDIR},
 		{Name: ".limit", Mode: syscall.S_IFDIR},
 		{Name: ".skip", Mode: syscall.S_IFDIR},
 		{Name: ".project", Mode: syscall.S_IFDIR},
 		{Name: ".export", Mode: syscall.S_IFDIR},
+	}
+	return fs.NewListDirStream(entries), fs.OK
+}
+
+// ---------------------------------------------------------------------------
+// FormatDirNode — hidden directory (.json, .csv, .tsv) containing a "results" file.
+// ---------------------------------------------------------------------------
+
+type FormatDirNode struct {
+	fs.Inode
+	ops          *fsops.Operations
+	dbName       string
+	collName     string
+	pathSegments []string // includes .export/<format>
+	format       string
+}
+
+var _ = (fs.NodeLookuper)((*FormatDirNode)(nil))
+var _ = (fs.NodeReaddirer)((*FormatDirNode)(nil))
+
+func (f *FormatDirNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	if name == "results" {
+		child := &PipelineResultNode{
+			ops:          f.ops,
+			dbName:       f.dbName,
+			collName:     f.collName,
+			pathSegments: f.pathSegments,
+		}
+		out.Mode = syscall.S_IFREG | 0444
+		out.Size = 4096
+		out.SetEntryTimeout(0)
+		out.SetAttrTimeout(0)
+		stable := fs.StableAttr{Mode: syscall.S_IFREG}
+		return f.NewInode(ctx, child, stable), fs.OK
+	}
+	return nil, syscall.ENOENT
+}
+
+func (f *FormatDirNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	entries := []fuse.DirEntry{
+		{Name: "results", Mode: syscall.S_IFREG},
 	}
 	return fs.NewListDirStream(entries), fs.OK
 }

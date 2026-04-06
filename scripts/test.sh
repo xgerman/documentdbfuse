@@ -104,9 +104,17 @@ run_test "cat pipeline results.json" \
 run_test "ls pipeline (.sort + .limit)" \
     exec_in sh -c "ls $MOUNT_POINT/sampledb/users/.sort/-age/.limit/2/ | grep -q '.json'"
 
-# Test: ls pipeline | xargs cat — read all matching documents individually
+# Test: ls pipeline | xargs cat — read all matching documents (no filtering needed)
 run_test "ls pipeline | xargs cat (read each matched doc)" \
-    exec_in sh -c "cd $MOUNT_POINT/sampledb/users/.match/city/Seattle && ls *.json | grep -v results.json | xargs -I{} cat {} | grep -q 'Seattle'"
+    exec_in sh -c "cd $MOUNT_POINT/sampledb/users/.match/city/Seattle && ls | xargs -I{} cat {} | grep -q 'Seattle'"
+
+# Test: cat .csv/results
+run_test "cat .csv/results (CSV export)" \
+    exec_in sh -c "cat $MOUNT_POINT/sampledb/users/.match/city/Seattle/.csv/results | grep -q '_id'"
+
+# Test: cat .tsv/results
+run_test "cat .tsv/results (TSV export)" \
+    exec_in sh -c "cat $MOUNT_POINT/sampledb/users/.match/city/Seattle/.tsv/results | grep -q '_id'"
 
 echo ""
 echo "================================"

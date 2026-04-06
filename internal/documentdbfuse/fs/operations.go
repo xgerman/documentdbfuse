@@ -119,7 +119,11 @@ func (o *Operations) ReadFile(ctx context.Context, path string) ([]byte, error) 
 		if info.Database == "" || info.Collection == "" {
 			return nil, ErrNotFound
 		}
-		return o.client.Aggregate(ctx, info.Database, info.Collection, info.Pipeline.Stages)
+		format := info.Pipeline.ExportFormat
+		if format == "" {
+			format = "json"
+		}
+		return o.client.AggregateFormat(ctx, info.Database, info.Collection, info.Pipeline.Stages, format)
 	}
 
 	if info.DocumentID == "" {

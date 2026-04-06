@@ -58,26 +58,12 @@ Chain path segments to build MongoDB aggregation pipelines. Each segment maps di
 ### List matching documents
 
 ```bash
-# ls returns document IDs that match the query
+# ls returns only document IDs that match — no extra files to filter
 ls /mnt/db/sampledb/users/.match/city/Seattle/
-# → results.json  user1.json
+# → user1.json
 
 ls /mnt/db/sampledb/users/.sort/-age/.limit/2/
-# → results.json  user2.json  user3.json
-```
-
-### Read all results as JSON
-
-```bash
-# results.json returns the full aggregation output as a JSON array
-cat /mnt/db/sampledb/users/.match/city/Seattle/results.json
-# [
-#   {
-#     "_id": "user1",
-#     "city": "Seattle",
-#     ...
-#   }
-# ]
+# → user2.json  user3.json
 ```
 
 ### Read individual matched documents
@@ -86,17 +72,34 @@ cat /mnt/db/sampledb/users/.match/city/Seattle/results.json
 # cat a specific matched document
 cat /mnt/db/sampledb/users/.match/city/Seattle/user1.json
 
-# or read all matched docs one by one
+# or read ALL matched docs — ls | xargs cat just works, no filtering needed
 ls /mnt/db/sampledb/users/.match/city/Seattle/ \
-  | grep -v results.json \
   | xargs -I{} cat /mnt/db/sampledb/users/.match/city/Seattle/{}
+```
+
+### Export as JSON, CSV, or TSV
+
+Results are available in hidden format directories — `.json`, `.csv`, `.tsv`:
+
+```bash
+# JSON array
+cat /mnt/db/sampledb/users/.match/city/Seattle/.json/results
+
+# CSV with header row
+cat /mnt/db/sampledb/users/.match/city/Seattle/.csv/results
+
+# TSV with header row
+cat /mnt/db/sampledb/users/.match/city/Seattle/.tsv/results
+
+# Pipe CSV to other tools
+cat /mnt/db/sampledb/users/.sort/-age/.limit/10/.csv/results | column -t -s,
 ```
 
 ### Chain multiple stages
 
 ```bash
 # Active users, sorted by age descending, top 3, only name and email
-cat /mnt/db/sampledb/users/.match/isActive/true/.sort/-age/.limit/3/.project/firstName,email/results.json
+cat /mnt/db/sampledb/users/.match/isActive/true/.sort/-age/.limit/3/.project/firstName,email/.json/results
 ```
 
 ### Legacy .export/json syntax
@@ -118,17 +121,19 @@ Agents explore and manipulate database data using `ls`/`cat`/`grep` — no Mongo
 ### Scripting
 ```bash
 # Find users in a city
-ls /mnt/db/mydb/users/.match/city/Seattle/ | grep -v results
+ls /mnt/db/mydb/users/.match/city/Seattle/
 
-# Export filtered data to a file
-cat /mnt/db/mydb/orders/.match/status/shipped/.limit/100/results.json > shipped.json
+# Export as CSV
+cat /mnt/db/mydb/orders/.match/status/shipped/.limit/100/.csv/results > shipped.csv
+
+# Export as JSON
+cat /mnt/db/mydb/orders/.match/status/shipped/.limit/100/.json/results > shipped.json
 
 # Count matching documents
-ls /mnt/db/mydb/users/.match/isActive/true/ | grep -v results | wc -l
+ls /mnt/db/mydb/users/.match/isActive/true/ | wc -l
 
-# Read every matching document
+# Read every matching document — no filtering needed
 ls /mnt/db/mydb/users/.match/city/Seattle/ \
-  | grep -v results.json \
   | xargs -I{} cat /mnt/db/mydb/users/.match/city/Seattle/{}
 ```
 
@@ -158,14 +163,18 @@ DocumentDBFUSE connects as a standard MongoDB client. It works with:
 │   │   └── .match/                        # aggregation pipeline
 │   │       └── city/
 │   │           └── Seattle/
-│   │               ├── results.json       # full query results
 │   │               ├── user1.json         # matched document
+│   │               ├── .json/results      # JSON array output
+│   │               ├── .csv/results       # CSV with header
+│   │               ├── .tsv/results       # TSV with header
 │   │               └── .sort/             # chain more stages
 │   │                   └── -age/
 │   │                       └── .limit/
 │   │                           └── 1/
-│   │                               ├── results.json
-│   │                               └── user1.json
+│   │                               ├── user1.json
+│   │                               ├── .json/results
+│   │                               ├── .csv/results
+│   │                               └── .tsv/results
 │   └── orders/
 └── admin/
 ```
@@ -213,7 +222,8 @@ Early prototype. Working:
 - ✅ `rm` — delete documents
 - ✅ `mkdir` / `rmdir` — create/drop collections
 - ✅ Aggregation pipeline paths (`.match`, `.sort`, `.limit`, `.skip`, `.project`)
-- ✅ `ls | xargs cat` on pipeline results
+- ✅ Export as JSON, CSV, TSV (`.json/results`, `.csv/results`, `.tsv/results`)
+- ✅ `ls | xargs cat` on pipeline results (no filtering needed)
 - ✅ Docker Compose with DocumentDB-local
 
 ## License
