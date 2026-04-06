@@ -1,0 +1,28 @@
+services:
+  documentdb:
+    image: ghcr.io/documentdb/documentdb/documentdb-local:latest
+    command: ["--username", "testuser", "--password", "testpass123"]
+    ports:
+      - "10260:10260"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 10260"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  mongofuse:
+    build: .
+    command:
+      - mount
+      - "mongodb://testuser:testpass123@documentdb:10260/?directConnection=true&tls=true&tlsInsecure=true"
+      - /mnt/db
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - "/dev/fuse"
+    security_opt:
+      - apparmor:unconfined
+    depends_on:
+      documentdb:
+        condition: service_healthy

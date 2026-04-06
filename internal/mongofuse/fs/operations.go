@@ -21,15 +21,17 @@ func NewOperations(client *db.Client) *Operations {
 type PathInfo struct {
 	Database   string
 	Collection string
-	DocumentID string // empty if listing collection
-	Extension  string // "json", "bson", etc.
+	DocumentID string    // empty if listing collection
+	Extension  string    // "json", "bson", etc.
+	Pipeline   *Pipeline // non-nil when aggregation segments are present
 }
 
 // ParsePath converts a filesystem path to a PathInfo.
 // Expected format: /<database>/<collection>/<docid>.json
+// or with pipeline: /<database>/<collection>/.match/field/value/.sort/field/.export/json
 func ParsePath(path string) PathInfo {
 	path = strings.TrimPrefix(path, "/")
-	parts := strings.SplitN(path, "/", 3)
+	parts := strings.Split(path, "/")
 
 	info := PathInfo{}
 	if len(parts) >= 1 && parts[0] != "" {
@@ -38,14 +40,38 @@ func ParsePath(path string) PathInfo {
 	if len(parts) >= 2 && parts[1] != "" {
 		info.Collection = parts[1]
 	}
-	if len(parts) >= 3 && parts[2] != "" {
-		filename := parts[2]
-		// Strip extension
-		if idx := strings.LastIndex(filename, "."); idx > 0 {
-			info.Extension = filename[idx+1:]
-			info.DocumentID = filename[:idx]
-		} else {
-			info.DocumentID = filename
+	if len(parts) > 2 {
+		remaining := parts[2:]
+		before, pipelineParts := extractPipelineSegments(remaining)
+
+		if len(pipelineParts) > 0 {
+			// Pipeline path: parse aggregation segments
+			pipeline, err := ParsePipeline(pipelineParts)
+			if err == nil {
+				info.Pipeline = pipeline
+				if pipeline.ExportFormat != "" {
+					info.Extension = pipeline.ExportFormat
+				}
+			}
+			// If there are non-pipeline parts before the pipeline, treat as doc ID
+			if len(before) > 0 {
+				filename := strings.Join(before, "/")
+				if idx := strings.LastIndex(filename, "."); idx > 0 {
+					info.Extension = filename[idx+1:]
+					info.DocumentID = filename[:idx]
+				} else {
+					info.DocumentID = filename
+				}
+			}
+		} else if len(before) > 0 {
+			// No pipeline segments — original behavior
+			filename := strings.Join(before, "/")
+			if idx := strings.LastIndex(filename, "."); idx > 0 {
+				info.Extension = filename[idx+1:]
+				info.DocumentID = filename[:idx]
+			} else {
+				info.DocumentID = filename
+			}
 		}
 	}
 
@@ -79,9 +105,18 @@ func (o *Operations) ReadDir(ctx context.Context, path string) ([]string, error)
 	}
 }
 
-// ReadFile returns document content as JSON.
+// ReadFile returns document content as JSON, or aggregation results if pipeline segments are present.
 func (o *Operations) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	info := ParsePath(path)
+
+	// Pipeline aggregation: return results as a file
+	if info.Pipeline != nil && len(info.Pipeline.Stages) > 0 {
+		if info.Database == "" || info.Collection == "" {
+			return nil, ErrNotFound
+		}
+		return o.client.Aggregate(ctx, info.Database, info.Collection, info.Pipeline.Stages)
+	}
+
 	if info.DocumentID == "" {
 		return nil, ErrIsDirectory
 	}
@@ -95,13 +130,8 @@ func (o *Operations) WriteFile(ctx context.Context, path string, data []byte) er
 		return ErrIsDirectory
 	}
 
-	// Try replace first; if doc doesn't exist, insert
-	err := o.client.ReplaceDocument(ctx, info.Database, info.Collection, info.DocumentID, data)
-	if err != nil {
-		// Fallback to insert for new documents
-		return o.client.InsertDocument(ctx, info.Database, info.Collection, data)
-	}
-	return nil
+	// Upsert: replace if exists, insert if not
+	return o.client.ReplaceDocument(ctx, info.Database, info.Collection, info.DocumentID, data)
 }
 
 // Remove deletes a document or drops a collection.

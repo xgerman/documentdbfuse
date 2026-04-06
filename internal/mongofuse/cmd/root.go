@@ -9,7 +9,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "mongofuse",
 	Short: "Mount any MongoDB-compatible database as a filesystem",
-	Long: `MongoFUSE mounts a MongoDB database via FUSE (Linux) or NFS (macOS).
+	Long: `MongoFUSE mounts a MongoDB database via FUSE (Linux).
 Browse collections with ls, read documents with cat, search with grep.`,
 }
 

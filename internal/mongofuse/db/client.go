@@ -113,7 +113,7 @@ func (c *Client) ReplaceDocument(ctx context.Context, dbName, collName, docID st
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	_, err = coll.ReplaceOne(ctx, filter, doc)
+	_, err = coll.ReplaceOne(ctx, filter, doc, options.Replace().SetUpsert(true))
 	return err
 }
 
