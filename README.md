@@ -122,11 +122,43 @@ cat /mnt/db/mydb/orders/.match/status/shipped/.limit/100/.csv/results > shipped.
 cat /mnt/db/mydb/orders/.match/status/shipped/.limit/100/.json/results > shipped.json
 
 # Count matching documents
-ls /mnt/db/mydb/users/.match/isActive/true/ | wc -l
+cat /mnt/db/mydb/users/.match/isActive/true/.count
 
 # Read every matching document — no filtering needed
 ls /mnt/db/mydb/users/.match/city/Seattle/ \
   | xargs -I{} cat /mnt/db/mydb/users/.match/city/Seattle/{}
+```
+
+## Working with Large Collections
+
+By default, `ls` caps at **10,000 documents** to prevent accidental full scans. Direct access (`cat`), pipelines (`.match/`), and `.count` always work regardless of collection size.
+
+```bash
+# Check collection size (O(1), no scan)
+cat /mnt/db/mydb/users/.count
+# → 524891
+
+# ls shows first 10K docs (stderr warning when capped)
+ls /mnt/db/mydb/users/ | wc -l
+# → 10000
+# [documentdbfuse] showing 10000 of 524891 documents. Use .match/ to filter or .all/ for full listing.
+
+# cat always works — direct findOne, not bounded by ls cap
+cat /mnt/db/mydb/users/user499999.json
+
+# ls .all/ to opt-in to full listing (you asked for it)
+ls /mnt/db/mydb/users/.all/ | wc -l
+# → 524891
+
+# Pipeline .count — count matching docs without listing
+cat /mnt/db/mydb/users/.match/region/EU/.count
+# → 175000
+
+# Use pipelines for large data — single server-side query
+cat /mnt/db/mydb/users/.match/region/EU/.sort/-age/.limit/10/.json/results
+
+# Change the cap with --ls-limit (0 = unlimited)
+documentdbfuse mount --ls-limit 50000 "mongodb://..." /mnt/db
 ```
 
 ## Architecture
@@ -152,10 +184,13 @@ DocumentDBFUSE connects as a standard MongoDB client. It works with:
 │   ├── users/                             # collection
 │   │   ├── user1.json                     # document (by _id)
 │   │   ├── user2.json
+│   │   ├── .count                         # cat → document count
+│   │   ├── .all/                          # uncapped full listing
 │   │   └── .match/                        # aggregation pipeline
 │   │       └── city/
 │   │           └── Seattle/
 │   │               ├── user1.json         # matched document
+│   │               ├── .count             # matched doc count
 │   │               ├── .json/results      # JSON array output
 │   │               ├── .csv/results       # CSV with header
 │   │               ├── .tsv/results       # TSV with header
@@ -216,6 +251,7 @@ Early prototype. Working:
 - ✅ Aggregation pipeline paths (`.match`, `.sort`, `.limit`, `.skip`, `.project`)
 - ✅ Export as JSON, CSV, TSV (`.json/results`, `.csv/results`, `.tsv/results`)
 - ✅ `ls | xargs cat` on pipeline results (no filtering needed)
+- ✅ Large collection support (`.count`, `.all/`, `--ls-limit`, capped `ls` with warning)
 - ✅ Docker Compose with DocumentDB-local
 
 ## License

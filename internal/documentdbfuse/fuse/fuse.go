@@ -157,6 +157,31 @@ func (c *CollectionNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Err
 }
 
 func (c *CollectionNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// .count — virtual file returning document count
+	if name == ".count" {
+		child := &CountNode{ops: c.ops, dbName: c.dbName, collName: c.collName}
+		out.Mode = syscall.S_IFREG | 0444
+		out.Size = 20
+		out.SetEntryTimeout(0)
+		out.SetAttrTimeout(0)
+		stable := fs.StableAttr{Mode: syscall.S_IFREG}
+		return c.NewInode(ctx, child, stable), fs.OK
+	}
+
+	// .all — virtual directory that bypasses the listing cap
+	if name == ".all" {
+		child := &AllDocsNode{
+			ops:      c.ops,
+			dbName:   c.dbName,
+			collName: c.collName,
+		}
+		out.Mode = syscall.S_IFDIR | 0755
+		out.SetEntryTimeout(entryTimeout)
+		out.SetAttrTimeout(attrTimeout)
+		stable := fs.StableAttr{Mode: syscall.S_IFDIR}
+		return c.NewInode(ctx, child, stable), fs.OK
+	}
+
 	// Pipeline segment — enter pipeline traversal mode
 	if strings.HasPrefix(name, ".") {
 		child := &PipelineNode{
@@ -234,6 +259,56 @@ func (d *DatabaseNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 		return syscall.EIO
 	}
 	return fs.OK
+}
+
+// ---------------------------------------------------------------------------
+// AllDocsNode — virtual directory that lists all documents without the cap.
+// ---------------------------------------------------------------------------
+
+type AllDocsNode struct {
+	fs.Inode
+	ops      *fsops.Operations
+	dbName   string
+	collName string
+}
+
+var _ = (fs.NodeLookuper)((*AllDocsNode)(nil))
+var _ = (fs.NodeReaddirer)((*AllDocsNode)(nil))
+
+func (a *AllDocsNode) path() string {
+	return "/" + a.dbName + "/" + a.collName
+}
+
+func (a *AllDocsNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	entries, err := a.ops.ReadDirAll(ctx, a.path())
+	if err != nil {
+		return nil, syscall.EIO
+	}
+	out := make([]fuse.DirEntry, len(entries))
+	for i, name := range entries {
+		out[i] = fuse.DirEntry{Name: name, Mode: syscall.S_IFREG}
+	}
+	return fs.NewListDirStream(out), fs.OK
+}
+
+func (a *AllDocsNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	filePath := a.path() + "/" + name
+	data, err := a.ops.ReadFile(ctx, filePath)
+	if err != nil {
+		return nil, syscall.ENOENT
+	}
+	child := &DocumentNode{
+		ops:      a.ops,
+		dbName:   a.dbName,
+		collName: a.collName,
+		fileName: name,
+	}
+	out.Mode = syscall.S_IFREG | 0644
+	out.Size = uint64(len(data))
+	out.SetEntryTimeout(entryTimeout)
+	out.SetAttrTimeout(0)
+	stable := fs.StableAttr{Mode: syscall.S_IFREG}
+	return a.NewInode(ctx, child, stable), fs.OK
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +393,22 @@ var _ = (fs.NodeReader)((*PipelineNode)(nil))
 var _ = (fs.NodeGetattrer)((*PipelineNode)(nil))
 
 func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// .count — virtual file returning count of documents matching the pipeline
+	if name == ".count" {
+		child := &PipelineCountNode{
+			ops:          p.ops,
+			dbName:       p.dbName,
+			collName:     p.collName,
+			pathSegments: p.pathSegments,
+		}
+		out.Mode = syscall.S_IFREG | 0444
+		out.Size = 20
+		out.SetEntryTimeout(0)
+		out.SetAttrTimeout(0)
+		stable := fs.StableAttr{Mode: syscall.S_IFREG}
+		return p.NewInode(ctx, child, stable), fs.OK
+	}
+
 	// .json / .csv / .tsv — hidden format directories containing "results"
 	if name == ".json" || name == ".csv" || name == ".tsv" {
 		format := strings.TrimPrefix(name, ".")
@@ -521,6 +612,88 @@ func (r *PipelineResultNode) Read(ctx context.Context, fh fs.FileHandle, dest []
 		return nil, syscall.EIO
 	}
 	data = append(data, '\n')
+	if off >= int64(len(data)) {
+		return fuse.ReadResultData(nil), fs.OK
+	}
+	return fuse.ReadResultData(data[off:]), fs.OK
+}
+
+// ---------------------------------------------------------------------------
+// CountNode — virtual read-only file returning the document count of a collection.
+// ---------------------------------------------------------------------------
+
+type CountNode struct {
+	fs.Inode
+	ops      *fsops.Operations
+	dbName   string
+	collName string
+}
+
+var _ = (fs.NodeOpener)((*CountNode)(nil))
+var _ = (fs.NodeReader)((*CountNode)(nil))
+var _ = (fs.NodeGetattrer)((*CountNode)(nil))
+
+func (n *CountNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	out.Mode = syscall.S_IFREG | 0444
+	out.Size = 20
+	out.SetTimeout(0)
+	return fs.OK
+}
+
+func (n *CountNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	return nil, 0, fs.OK
+}
+
+func (n *CountNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	count, err := n.ops.Count(ctx, n.dbName, n.collName)
+	if err != nil {
+		return nil, syscall.EIO
+	}
+	data := []byte(fmt.Sprintf("%d\n", count))
+	if off >= int64(len(data)) {
+		return fuse.ReadResultData(nil), fs.OK
+	}
+	return fuse.ReadResultData(data[off:]), fs.OK
+}
+
+// ---------------------------------------------------------------------------
+// PipelineCountNode — virtual read-only file returning the count of documents
+// matching a pipeline.
+// ---------------------------------------------------------------------------
+
+type PipelineCountNode struct {
+	fs.Inode
+	ops          *fsops.Operations
+	dbName       string
+	collName     string
+	pathSegments []string
+}
+
+var _ = (fs.NodeOpener)((*PipelineCountNode)(nil))
+var _ = (fs.NodeReader)((*PipelineCountNode)(nil))
+var _ = (fs.NodeGetattrer)((*PipelineCountNode)(nil))
+
+func (n *PipelineCountNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	out.Mode = syscall.S_IFREG | 0444
+	out.Size = 20
+	out.SetTimeout(0)
+	return fs.OK
+}
+
+func (n *PipelineCountNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	return nil, 0, fs.OK
+}
+
+func (n *PipelineCountNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	pipeline, err := fsops.ParsePipeline(n.pathSegments)
+	if err != nil || len(pipeline.Stages) == 0 {
+		return nil, syscall.EIO
+	}
+	count, err := n.ops.AggregateCount(ctx, n.dbName, n.collName, pipeline.Stages)
+	if err != nil {
+		return nil, syscall.EIO
+	}
+	data := []byte(fmt.Sprintf("%d\n", count))
 	if off >= int64(len(data)) {
 		return fuse.ReadResultData(nil), fs.OK
 	}

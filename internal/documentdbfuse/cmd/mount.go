@@ -16,6 +16,7 @@ import (
 
 func buildMountCmd() *cobra.Command {
 	var readOnly bool
+	var lsLimit int64
 
 	cmd := &cobra.Command{
 		Use:   "mount <connection-string> <mount-point>",
@@ -43,7 +44,7 @@ Examples:
 				return fmt.Errorf("failed to connect to MongoDB: %w", err)
 			}
 
-			ops := fs.NewOperations(client)
+			ops := fs.NewOperations(client, lsLimit)
 
 			var mountOpts []string
 			if readOnly {
@@ -78,6 +79,7 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount in read-only mode")
+	cmd.Flags().Int64Var(&lsLimit, "ls-limit", 10000, "Maximum number of documents shown in a directory listing (0 = unlimited)")
 
 	return cmd
 }

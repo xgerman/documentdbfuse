@@ -49,22 +49,37 @@ func (c *Client) ListCollections(ctx context.Context, dbName string) ([]string, 
 	return c.client.Database(dbName).ListCollectionNames(ctx, map[string]interface{}{})
 }
 
-// ListDocumentIDs returns document _id values as strings for a collection.
-func (c *Client) ListDocumentIDs(ctx context.Context, dbName, collName string) ([]string, error) {
+// CountDocuments returns the total number of documents in a collection.
+func (c *Client) CountDocuments(ctx context.Context, dbName, collName string) (int64, error) {
 	coll := c.client.Database(dbName).Collection(collName)
-	cursor, err := coll.Find(ctx, map[string]interface{}{}, options.Find().SetProjection(map[string]int{"_id": 1}))
+	return coll.CountDocuments(ctx, map[string]interface{}{})
+}
+
+// ListDocumentIDs returns document _id values as strings for a collection.
+// If limit > 0, at most limit IDs are returned. total is always the full document count.
+func (c *Client) ListDocumentIDs(ctx context.Context, dbName, collName string, limit int64) (ids []string, total int64, err error) {
+	total, err = c.CountDocuments(ctx, dbName, collName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list documents: %w", err)
+		return nil, 0, fmt.Errorf("failed to count documents: %w", err)
+	}
+
+	coll := c.client.Database(dbName).Collection(collName)
+	findOpts := options.Find().SetProjection(map[string]int{"_id": 1})
+	if limit > 0 {
+		findOpts.SetLimit(limit)
+	}
+	cursor, err := coll.Find(ctx, map[string]interface{}{}, findOpts)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list documents: %w", err)
 	}
 	defer cursor.Close(ctx)
 
-	var ids []string
 	for cursor.Next(ctx) {
 		raw := cursor.Current
 		idVal := raw.Lookup("_id")
 		ids = append(ids, formatID(idVal))
 	}
-	return ids, cursor.Err()
+	return ids, total, cursor.Err()
 }
 
 // GetDocument returns a document as JSON bytes.

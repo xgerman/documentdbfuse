@@ -138,6 +138,28 @@ func formatCellValue(v interface{}) string {
 	}
 }
 
+// AggregateCount appends a $count stage to the pipeline and returns the count.
+func (c *Client) AggregateCount(ctx context.Context, dbName, collName string, pipeline []bson.D) (int64, error) {
+	countPipeline := append(append([]bson.D{}, pipeline...), bson.D{{Key: "$count", Value: "count"}})
+	results, err := c.aggregateRaw(ctx, dbName, collName, countPipeline)
+	if err != nil {
+		return 0, err
+	}
+	if len(results) == 0 {
+		return 0, nil
+	}
+	switch v := results[0]["count"].(type) {
+	case int32:
+		return int64(v), nil
+	case int64:
+		return v, nil
+	case float64:
+		return int64(v), nil
+	default:
+		return 0, fmt.Errorf("unexpected count type: %T", v)
+	}
+}
+
 // AggregateIDs runs an aggregation pipeline and returns matching document IDs as "id.json" strings.
 func (c *Client) AggregateIDs(ctx context.Context, dbName, collName string, pipeline []bson.D) ([]string, error) {
 	coll := c.client.Database(dbName).Collection(collName)
