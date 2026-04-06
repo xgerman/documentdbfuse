@@ -90,6 +90,24 @@ run_test "rmdir (drop collection)" exec_in rmdir "$MOUNT_POINT/testdb/testcol"
 # Test: remove database
 run_test "rmdir (drop database)" exec_in rmdir "$MOUNT_POINT/testdb"
 
+# --- Aggregation pipeline tests ---
+
+# Test: ls with pipeline filter returns matching docs
+run_test "ls pipeline (.match)" \
+    exec_in sh -c "ls $MOUNT_POINT/sampledb/users/.match/city/Seattle/ | grep -q '.json'"
+
+# Test: cat results.json returns JSON array
+run_test "cat pipeline results.json" \
+    exec_in sh -c "cat $MOUNT_POINT/sampledb/users/.match/city/Seattle/results.json | grep -q '_id'"
+
+# Test: ls pipeline + sort + limit
+run_test "ls pipeline (.sort + .limit)" \
+    exec_in sh -c "ls $MOUNT_POINT/sampledb/users/.sort/-age/.limit/2/ | grep -q '.json'"
+
+# Test: ls pipeline | xargs cat — read all matching documents individually
+run_test "ls pipeline | xargs cat (read each matched doc)" \
+    exec_in sh -c "cd $MOUNT_POINT/sampledb/users/.match/city/Seattle && ls *.json | grep -v results.json | xargs -I{} cat {} | grep -q 'Seattle'"
+
 echo ""
 echo "================================"
 echo "Results: $PASS passed, $FAIL failed"

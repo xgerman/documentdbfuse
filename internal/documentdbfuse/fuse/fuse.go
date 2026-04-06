@@ -334,6 +334,27 @@ func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryO
 		return p.NewInode(ctx, child, stable), fs.OK
 	}
 
+	// Document file (*.json) — resolve to actual document from the collection
+	if strings.HasSuffix(name, ".json") && !strings.HasPrefix(name, ".") {
+		child := &DocumentNode{
+			ops:      p.ops,
+			dbName:   p.dbName,
+			collName: p.collName,
+			fileName: name,
+		}
+		filePath := "/" + p.dbName + "/" + p.collName + "/" + name
+		data, err := p.ops.ReadFile(ctx, filePath)
+		if err != nil {
+			return nil, syscall.ENOENT
+		}
+		out.Mode = syscall.S_IFREG | 0644
+		out.Size = uint64(len(data))
+		out.SetEntryTimeout(0)
+		out.SetAttrTimeout(0)
+		stable := fs.StableAttr{Mode: syscall.S_IFREG}
+		return p.NewInode(ctx, child, stable), fs.OK
+	}
+
 	newSegments := append(append([]string{}, p.pathSegments...), name)
 
 	// .export/format terminal — return a readable file
