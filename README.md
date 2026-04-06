@@ -102,14 +102,6 @@ cat /mnt/db/sampledb/users/.sort/-age/.limit/10/.csv/results | column -t -s,
 cat /mnt/db/sampledb/users/.match/isActive/true/.sort/-age/.limit/3/.project/firstName,email/.json/results
 ```
 
-### Legacy .export/json syntax
-
-`.export/json` still works as an explicit terminal if preferred:
-
-```bash
-cat /mnt/db/sampledb/users/.match/isActive/true/.export/json
-```
-
 ## Use Cases
 
 ### Developer debugging
