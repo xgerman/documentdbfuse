@@ -326,6 +326,7 @@ func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryO
 			pathSegments: newSegments,
 		}
 		out.Mode = syscall.S_IFREG | 0444
+		out.Size = 4096 // estimated; real content from Read
 		out.SetEntryTimeout(0)
 		out.SetAttrTimeout(0)
 		stable := fs.StableAttr{Mode: syscall.S_IFREG}
