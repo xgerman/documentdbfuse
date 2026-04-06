@@ -82,6 +82,11 @@ func ParsePath(path string) PathInfo {
 func (o *Operations) ReadDir(ctx context.Context, path string) ([]string, error) {
 	info := ParsePath(path)
 
+	// Pipeline query: run aggregation and return document IDs from results
+	if info.Pipeline != nil && len(info.Pipeline.Stages) > 0 && info.Database != "" && info.Collection != "" {
+		return o.client.AggregateIDs(ctx, info.Database, info.Collection, info.Pipeline.Stages)
+	}
+
 	switch {
 	case info.Database == "":
 		// Root: list databases

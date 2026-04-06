@@ -313,11 +313,30 @@ type PipelineNode struct {
 
 var _ = (fs.NodeLookuper)((*PipelineNode)(nil))
 var _ = (fs.NodeReaddirer)((*PipelineNode)(nil))
+var _ = (fs.NodeOpener)((*PipelineNode)(nil))
+var _ = (fs.NodeReader)((*PipelineNode)(nil))
+var _ = (fs.NodeGetattrer)((*PipelineNode)(nil))
 
 func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// "results.json" — read current pipeline results as a file
+	if name == "results.json" {
+		child := &PipelineResultNode{
+			ops:          p.ops,
+			dbName:       p.dbName,
+			collName:     p.collName,
+			pathSegments: p.pathSegments,
+		}
+		out.Mode = syscall.S_IFREG | 0444
+		out.Size = 4096
+		out.SetEntryTimeout(0)
+		out.SetAttrTimeout(0)
+		stable := fs.StableAttr{Mode: syscall.S_IFREG}
+		return p.NewInode(ctx, child, stable), fs.OK
+	}
+
 	newSegments := append(append([]string{}, p.pathSegments...), name)
 
-	// Check if we've completed a .export/format terminal — return a readable file
+	// .export/format terminal — return a readable file
 	if len(newSegments) >= 2 && newSegments[len(newSegments)-2] == ".export" {
 		child := &PipelineResultNode{
 			ops:          p.ops,
@@ -326,7 +345,7 @@ func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryO
 			pathSegments: newSegments,
 		}
 		out.Mode = syscall.S_IFREG | 0444
-		out.Size = 4096 // estimated; real content from Read
+		out.Size = 4096
 		out.SetEntryTimeout(0)
 		out.SetAttrTimeout(0)
 		stable := fs.StableAttr{Mode: syscall.S_IFREG}
@@ -347,9 +366,50 @@ func (p *PipelineNode) Lookup(ctx context.Context, name string, out *fuse.EntryO
 	return p.NewInode(ctx, child, stable), fs.OK
 }
 
+func (p *PipelineNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	out.Mode = syscall.S_IFDIR | 0755
+	out.SetTimeout(attrTimeout)
+	return fs.OK
+}
+
+func (p *PipelineNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	return nil, 0, fs.OK
+}
+
+func (p *PipelineNode) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	// Reading a pipeline directory returns aggregation results as JSON
+	fullPath := "/" + p.dbName + "/" + p.collName + "/" + strings.Join(p.pathSegments, "/")
+	data, err := p.ops.ReadFile(ctx, fullPath)
+	if err != nil {
+		return nil, syscall.EIO
+	}
+	data = append(data, '\n')
+	if off >= int64(len(data)) {
+		return fuse.ReadResultData(nil), fs.OK
+	}
+	return fuse.ReadResultData(data[off:]), fs.OK
+}
+
 func (p *PipelineNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	// Suggest available next segments
+	// Try to parse the accumulated segments as a complete pipeline.
+	// If it parses successfully, run the query and list matching document IDs.
+	pipeline, err := fsops.ParsePipeline(p.pathSegments)
+	if err == nil && len(pipeline.Stages) > 0 {
+		fullPath := "/" + p.dbName + "/" + p.collName + "/" + strings.Join(p.pathSegments, "/")
+		dirEntries, readErr := p.ops.ReadDir(ctx, fullPath)
+		if readErr == nil && len(dirEntries) > 0 {
+			out := make([]fuse.DirEntry, 0, len(dirEntries)+1)
+			out = append(out, fuse.DirEntry{Name: "results.json", Mode: syscall.S_IFREG})
+			for _, name := range dirEntries {
+				out = append(out, fuse.DirEntry{Name: name, Mode: syscall.S_IFREG})
+			}
+			return fs.NewListDirStream(out), fs.OK
+		}
+	}
+
+	// Incomplete pipeline or no results — show available segments
 	entries := []fuse.DirEntry{
+		{Name: "results.json", Mode: syscall.S_IFREG},
 		{Name: ".match", Mode: syscall.S_IFDIR},
 		{Name: ".sort", Mode: syscall.S_IFDIR},
 		{Name: ".limit", Mode: syscall.S_IFDIR},

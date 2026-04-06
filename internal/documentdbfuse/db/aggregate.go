@@ -42,3 +42,24 @@ func (c *Client) Aggregate(ctx context.Context, dbName, collName string, pipelin
 	data = append(data, '\n')
 	return data, nil
 }
+
+// AggregateIDs runs an aggregation pipeline and returns matching document IDs as "id.json" strings.
+func (c *Client) AggregateIDs(ctx context.Context, dbName, collName string, pipeline []bson.D) ([]string, error) {
+	coll := c.client.Database(dbName).Collection(collName)
+
+	// Append a $project stage to only fetch _id
+	idPipeline := append(append([]bson.D{}, pipeline...), bson.D{{Key: "$project", Value: bson.D{{Key: "_id", Value: 1}}}})
+
+	cursor, err := coll.Aggregate(ctx, idPipeline)
+	if err != nil {
+		return nil, fmt.Errorf("aggregation failed: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var ids []string
+	for cursor.Next(ctx) {
+		idVal := cursor.Current.Lookup("_id")
+		ids = append(ids, formatID(idVal)+".json")
+	}
+	return ids, cursor.Err()
+}
